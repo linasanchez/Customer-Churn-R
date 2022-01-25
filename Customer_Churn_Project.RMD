@@ -1,0 +1,507 @@
+---
+title: 'Final Project'
+date: "12/03/2021"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    number_sections: yes
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+options(width = 80)
+```
+
+# Load library
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggcorrplot)
+library(GGally)
+library(alr4)
+library(pROC)
+library(ResourceSelection)
+library(caret)
+library(caTools)
+theme_set(theme_bw())
+```
+
+# Read and exam the Dataset
+
+```{r}
+bank_df <- read.csv("BankChurners.csv")
+bank_complete <- bank_df %>% select(-starts_with("Naive_Bayes"))
+head(bank_complete)
+```
+```{r}
+typeof(bank_complete$Attrition_Flag)
+```
+
+# Descriptive analytics
+
+## Dependent Variable
+
+```{r}
+summary(bank_complete$Avg_Utilization_Ratio)
+bank_complete %>% ggplot(aes(x=Avg_Utilization_Ratio))+geom_histogram(bins=25,fill='blue',alpha=0.5)+ggtitle("Histogram of Avg_Utilization_Ratio")
+bank_complete %>% ggplot(aes(y=Avg_Utilization_Ratio))+geom_boxplot(fill='blue',alpha=0.5)+ggtitle("Boxplot of Avg_Utilization_Ratio")
+```
+
+the distribution of avg utilization ratio is right-skewed. We applied the sqrt transformation on the variable
+
+```{r}
+bank_complete %>% ggplot(aes(x=sqrt(Avg_Utilization_Ratio)))+geom_histogram(bins=25,fill='blue',alpha=0.5)+ggtitle("Histogram of sqrt_Avg_Utilization_Ratio")
+bank_complete %>% ggplot(aes(y=sqrt(Avg_Utilization_Ratio)))+geom_boxplot(fill='blue',alpha=0.5)+ggtitle("Boxplot of sqrt_Avg_Utilization_Ratio")
+```
+
+## Categorical variables
+
+### Gender
+
+```{r}
+t.test(Avg_Utilization_Ratio~Gender,data=bank_complete)
+bank_complete %>% ggplot(aes(y=Avg_Utilization_Ratio,x=Gender,fill=Gender))+geom_boxplot(alpha=0.7)+ggtitle("Boxplot of Avg_Utilization_Ratio by Gender")
+```
+
+### Education_Level
+```{r}
+education_anova <- aov(Avg_Utilization_Ratio~Education_Level,data=bank_complete)
+summary(education_anova)
+```
+
+Not significant
+
+### Marital_Status
+
+```{r}
+Marital_anova <- aov(Avg_Utilization_Ratio~Marital_Status,data=bank_complete)
+summary(Marital_anova)
+TukeyHSD(Marital_anova)
+bank_complete <- bank_complete %>% mutate(Married=ifelse(Marital_Status=='Married','Yes','No'))
+t.test(Avg_Utilization_Ratio~Married,data=bank_complete)
+bank_complete %>% ggplot(aes(y=Avg_Utilization_Ratio,x=Married,fill=Married))+geom_boxplot(alpha=0.7)+ggtitle("Boxplot of Avg_Utilization_Ratio by Married or not")
+```
+
+### Income_Category
+
+```{r}
+Income_anova <- aov(Avg_Utilization_Ratio~Income_Category,data=bank_complete)
+summary(Income_anova)
+TukeyHSD(Income_anova)
+bank_complete %>% ggplot(aes(y=Avg_Utilization_Ratio,x=Income_Category,fill=Income_Category))+geom_boxplot(alpha=0.7)+ggtitle("Boxplot of Avg_Utilization_Ratio by Income")
+```
+
+### Card_Category
+
+```{r}
+Card_anova <- aov(Avg_Utilization_Ratio~Card_Category,data=bank_complete)
+summary(Card_anova)
+TukeyHSD(Card_anova)
+bank_complete <- bank_complete %>% mutate(BlueCard=ifelse(Card_Category=='Blue','Yes','No'))
+t.test(Avg_Utilization_Ratio~BlueCard,data=bank_complete) #most significant
+bank_complete %>% ggplot(aes(y=Avg_Utilization_Ratio,x=BlueCard,fill=BlueCard))+geom_boxplot(alpha=0.7)+ggtitle("Boxplot of Avg_Utilization_Ratio by Blue Card")
+```
+
+## Numerical Variables
+
+```{r}
+bank_num <- bank_complete%>% select(Customer_Age,Dependent_count, Months_on_book,Total_Relationship_Count,Months_Inactive_12_mon,
+                        Contacts_Count_12_mon,Credit_Limit,Total_Revolving_Bal,Avg_Open_To_Buy,Total_Amt_Chng_Q4_Q1,
+                        Total_Trans_Amt,Total_Trans_Ct,Total_Ct_Chng_Q4_Q1,Avg_Utilization_Ratio)
+summary(bank_num)
+```
+
+### correlation between the average utilization ratio with all the potential numerical variables
+
+```{r}
+utilize_ratio_cor <- cor(select(bank_num,-Avg_Utilization_Ratio),bank_num$Avg_Utilization_Ratio,use='complete.obs')
+utilize_ratio_cor
+ggcorrplot(utilize_ratio_cor)+ggtitle("Correlation plot of avg_utilization_ratio")
+```
+
+Based on the correlation, we can find that Credit Limit, Total_Revolving_Bal, and Avg_Open_to_Buy have the highest correlation with dependent variable Avg_Utilization_Ratio
+
+### Credit_Limit
+
+```{r}
+bank_num %>% ggplot(aes(x=Credit_Limit))+geom_histogram(bins=25,fill='blue',alpha=0.5)+ggtitle("Credit Limit histogram")
+bank_num %>% ggplot(aes(x=Credit_Limit,y=Avg_Utilization_Ratio))+geom_point()+ggtitle("Avg Utilization ratio scatter plot by Credit Limit")
+```
+
+### Total_Revolving_Bal
+
+```{r}
+bank_num %>% ggplot(aes(x=Total_Revolving_Bal))+geom_histogram(bins=25,fill='red',alpha=0.6)+ggtitle("Total_Revolving_Balance histogram")
+bank_num %>% ggplot(aes(x=Total_Revolving_Bal,y=Avg_Utilization_Ratio))+geom_point()+ggtitle("Avg Utilization ratio scatter plot by Total_Revolving_Balance")
+```
+
+### Avg_Open_To_Buy
+
+```{r}
+bank_num %>% ggplot(aes(x=Avg_Open_To_Buy))+geom_histogram(bins=25,fill='blue',alpha=0.4)+ggtitle("Avg_Open_To_Buy histogram")
+bank_num %>% ggplot(aes(x=Avg_Open_To_Buy,y=Avg_Utilization_Ratio))+geom_point()+ggtitle("Avg Utilization ratio scatter plot by Avg_Open_To_Buy")
+```
+
+All three variables are moderately right-skewed, and we considered using transform on these variables.
+
+# Multiple Linear Regression Analysis
+
+## Full Model
+
+```{r}
+attach(bank_complete)
+m_full<- lm(sqrt(Avg_Utilization_Ratio)~.-CLIENTNUM-Attrition_Flag-Education_Level-Marital_Status-Card_Category+log(Credit_Limit)+sqrt(Total_Revolving_Bal)+log(Avg_Open_To_Buy), data= bank_complete)
+summary(m_full)
+```
+
+P-value of our full model is lower than 0.05. There is statistically sufficient evidence the model is valid. 
+
+The adjusted R-squared is 0.9537, which means 95.37% of the variation in Y( sqrt(avg_utilization_ratio) can be explained by this model. 
+
+However, Avg_open_to_Buy is showing NA in the model summary.
+
+Firstly, Avg_open_to_Buy can be explained by the combination of the other variables including credit limit and Total revolving balance, which is the main reason it shows NA in the model result.
+
+Secondly, since the utilization ratio is equal to total revolving balance divide by credit limit. So the data leakage would render our model meaningless.
+
+## Model without total revolving balance and avg_open_to_buy
+
+We removed both variables and refit the model
+
+```{r}
+m1 <- lm(sqrt(Avg_Utilization_Ratio)~.-CLIENTNUM-Attrition_Flag-Education_Level-Marital_Status-Card_Category+log(Credit_Limit)-Total_Revolving_Bal-Avg_Open_To_Buy, data= bank_complete)
+summary(m1)
+```
+
+We find that the adjust r2 is dropping heavily, so we exam the diagnose plot
+
+```{r}
+par(mfrow=c(2,2))
+plot(m1)
+```
+
+there is a line in both residuals vs Fitted plot and Scale-Location plot, and we determined that these are the data whose Avg utilization ratio is equal to 0
+
+## Removed all the 0 value utilization ratio observation
+
+```{r}
+detach(bank_complete)
+
+bank_complete_no0 <- bank_complete %>% filter(Avg_Utilization_Ratio>0)
+
+attach(bank_complete_no0)
+```
+
+## Refit the model with 7657 observations with 16 variables
+
+```{r}
+m2<- lm(sqrt(Avg_Utilization_Ratio)~.-CLIENTNUM-Attrition_Flag-Education_Level-Marital_Status-Card_Category+log(Credit_Limit)-Total_Revolving_Bal-Avg_Open_To_Buy, data= bank_complete_no0)
+summary(m2)
+```
+
+
+We applied the variable selection procedure to look for an optimal model. In order to make the model simple and efficient, we used the BIC criterion.
+
+## Backward elimination model based on BIC
+
+```{r}
+n2 <- length(m2$residuals)
+backBIC2 <- step(m2,direction = "back",data=bank_complete, k=log(n2))
+summary(backBIC2)
+```
+
+## Stepwise selection model based on BIC
+
+```{r}
+stepBIC2 <- step(m2,direction = "both",data=bank_complete, k=log(n2))
+summary(stepBIC2)
+```
+
+## Forward selection model based on the BIC criterion
+
+```{r}
+mint <- lm(sqrt(Avg_Utilization_Ratio)~1,data=bank_complete_no0)
+forwardBIC <- step(mint,scope=list(lower=~1,upper=~Customer_Age+Dependent_count+Months_on_book+Total_Relationship_Count+
+                                     Months_Inactive_12_mon+Contacts_Count_12_mon+Credit_Limit+ log(Credit_Limit)+
+                                     Total_Amt_Chng_Q4_Q1+Total_Trans_Amt+ Total_Trans_Ct+Total_Ct_Chng_Q4_Q1+
+                                     Gender+Married+Income_Category+BlueCard,direction = "forward", data=bank_complete_no0,k=log(n2)))
+summary(forwardBIC)
+```
+
+
+
+Backward elimination and stepwise selection based on BIC choose the same model with 3 predictors, which are all significant in the model. And p-value is lower than 0.05, which means the model overall is highly significant. Because the Adjusted R-squared is 0.7852, it means 78.52% of the variation in the sqrt(avg_utilization_ratio) can be explained by the model
+
+Only 5 variables are statistically significant in the forward selection model based on the BIC criterion, which has 6 variables.
+
+Even though the forward selection model has 0.7858 adjusted R-squared, and can explain 0.06% extra variation in Y better than the stepwise model.
+
+We would still omit this model, because it’s too complex.
+
+## Regression diagnostics plot
+
+```{r}
+par(mfrow=c(2,2))
+plot(stepBIC2)
+```
+
+We didn’t find any special pattern in residuals vs fitted plot, and we could see that 3943 is close to the cook’s distance bands, which means it is the bad leverage points; 5485,3943, and 4369 are the bad normality points because they are far away from the line in the Normal QQ plot..
+
+We should investigate these points for further study.
+
+# Logistic Regression
+
+```{r}
+
+bank_complete <- bank_complete%>%mutate(Attrition_Flag = factor(Attrition_Flag, levels = c('Existing Customer','Attrited Customer'),
+                                                             labels = c(0,1)))
+y <- bank_complete$Attrition_Flag
+attach(bank_complete)
+```
+
+## Data visualization of dependent variable(Attrition_Flag) with all predictor variable
+
+```{r}
+par(mfrow=c(2,2))
+boxplot(Customer_Age~y, ylab="Customer Age",xlab="Attrited Customer? (0=No, 1=Yes)")
+boxplot(Dependent_count~y, ylab="Dependent Count",xlab="Attrited Customer? (0=No, 1=Yes)") #s
+boxplot(Months_on_book~y, ylab="Months on Book",xlab="Attrited Customer? (0=No, 1=Yes)") #
+boxplot(Total_Relationship_Count~y, ylab="Total Relationship Count",xlab="Attrited Customer? (0=No, 1=Yes)") #
+boxplot(Months_Inactive_12_mon~y, ylab="Months Inactive 12 mon",xlab="Attrited Customer? (0=No, 1=Yes)")#s
+boxplot(Contacts_Count_12_mon~y, ylab="Contacts Count 12 mon",xlab="Attrited Customer? (0=No, 1=Yes)")#s
+boxplot(Credit_Limit~y, ylab="Credit_Limit",xlab="Attrited Customer? (0=No, 1=Yes)") #
+boxplot(Total_Revolving_Bal~y, ylab="Total_Revolving_Bal",xlab="Attrited Customer? (0=No, 1=Yes)")#s
+boxplot(Avg_Open_To_Buy~y, ylab="Avg Open To Buy",xlab="Attrited Customer? (0=No, 1=Yes)") #
+boxplot(Total_Amt_Chng_Q4_Q1~y, ylab="Total Amt Chng Q4 Q1",xlab="Attrited Customer? (0=No, 1=Yes)")
+boxplot(Total_Trans_Amt~y, ylab="Total Trans Amt",xlab="Attrited Customer? (0=No, 1=Yes)") #
+boxplot(Total_Trans_Ct~y, ylab="Total_Trans_Ct",xlab="Attrited Customer? (0=No, 1=Yes)") #
+boxplot(Total_Ct_Chng_Q4_Q1~y, ylab="Total Ct Chng Q4 Q1",xlab="Attrited Customer? (0=No, 1=Yes)")
+boxplot(Avg_Utilization_Ratio~y, ylab="Avg Utilization Ratio",xlab="Attrited Customer? (0=No, 1=Yes)")#s
+```
+
+The distributions of some predictors are quite skewed. In this cases we include both predictor and log(predictor)/sqrt(predictor) as potential predictors in the logistic regression model
+
+## Fit logistic Regression full model
+
+```{r}
+m2 <- glm(y~Gender+Dependent_count+Education_Level+Marital_Status+Income_Category+Card_Category+Customer_Age+Dependent_count+log(Months_on_book)
+          +Months_on_book+Total_Relationship_Count+log(Total_Relationship_Count)+Months_Inactive_12_mon+Contacts_Count_12_mon+Credit_Limit
+          +log(Credit_Limit)+Total_Revolving_Bal+Avg_Open_To_Buy+log(Avg_Open_To_Buy)+Total_Amt_Chng_Q4_Q1+Total_Trans_Amt+log(Total_Trans_Amt)
+          +Total_Trans_Ct+log(Total_Trans_Ct)+Total_Ct_Chng_Q4_Q1+Avg_Utilization_Ratio,family=binomial(),data=bank_complete)
+m_2 <- glm(y~Customer_Age+Dependent_count+log(Months_on_book)+Months_on_book+Total_Relationship_Count+log(Total_Relationship_Count)
+          +Months_Inactive_12_mon+Contacts_Count_12_mon+Credit_Limit+log(Credit_Limit)+Total_Revolving_Bal+Avg_Open_To_Buy+log(Avg_Open_To_Buy)
+          +Total_Amt_Chng_Q4_Q1+Total_Trans_Amt+log(Total_Trans_Amt)+Total_Trans_Ct+log(Total_Trans_Ct)+Total_Ct_Chng_Q4_Q1+Avg_Utilization_Ratio,family=binomial(),data=bank_complete)
+```
+
+### Obtaining marginal model plots
+
+```{r}
+mmps(m_2,layout=c(2,3))
+```
+
+```{r}
+summary(m2)
+```
+
+## Adding Sqrt transformations
+
+```{r}
+m3 <- glm(y~Gender+Education_Level+Marital_Status+Income_Category+Card_Category+Customer_Age+Dependent_count+sqrt(Dependent_count)+log(Months_on_book)+
+            Months_on_book+Total_Relationship_Count+log(Total_Relationship_Count)+Months_Inactive_12_mon+sqrt(Months_Inactive_12_mon)+
+            Contacts_Count_12_mon+sqrt(Contacts_Count_12_mon)+Credit_Limit+log(Credit_Limit)+Total_Revolving_Bal+sqrt(Total_Revolving_Bal)+
+            Avg_Open_To_Buy+log(Avg_Open_To_Buy)+Total_Amt_Chng_Q4_Q1+Total_Trans_Amt+log(Total_Trans_Amt)+Total_Trans_Ct+log(Total_Trans_Ct)
+           +Total_Ct_Chng_Q4_Q1+Avg_Utilization_Ratio+sqrt(Avg_Utilization_Ratio),family=binomial(),data=bank_complete)
+m_3 <- glm(y~Customer_Age+Dependent_count+sqrt(Dependent_count)+log(Months_on_book)+
+            Months_on_book+Total_Relationship_Count+log(Total_Relationship_Count)+Months_Inactive_12_mon+sqrt(Months_Inactive_12_mon)+
+            Contacts_Count_12_mon+sqrt(Contacts_Count_12_mon)+Credit_Limit+log(Credit_Limit)+Total_Revolving_Bal+sqrt(Total_Revolving_Bal)+
+            Avg_Open_To_Buy+log(Avg_Open_To_Buy)+Total_Amt_Chng_Q4_Q1+Total_Trans_Amt+log(Total_Trans_Amt)+Total_Trans_Ct+log(Total_Trans_Ct)
+           +Total_Ct_Chng_Q4_Q1+Avg_Utilization_Ratio+sqrt(Avg_Utilization_Ratio),family=binomial(),data=bank_complete)
+```
+
+### Output from R for m3
+
+```{r}
+summary(m3)
+```
+
+
+### Obtaining marginal model plots
+
+```{r}
+mmps(m_3,layout=c(2,3))
+```
+
+## Using the difference in deviance to compare the nested models m_2 and m3
+
+```{r}
+anova(m2,m3,test="Chisq")
+```
+
+The addition of the terms have significantly reduced the deviance so m3 is the best model
+
+## Examine leverage values and standardized deviance residuals for m3
+
+```{r}
+par(mfrow=c(1,1))
+hvalues <- influence(m3)$hat
+stanresDeviance <- residuals(m3)/sqrt(1-hvalues)
+plot(hvalues,stanresDeviance,ylab="Standardized Deviance Residuals",xlab="Leverage Values",ylim=c(-4,4),xlim=c(-0.03,0.7))
+abline(v=2*26/length(y),lty=2)
+```
+
+## optimal model
+
+### stepwise selection
+
+```{r}
+m3.step <- step(m3,direction="both")
+summary(m3.step)
+```
+
+### Backward selection
+
+```{r}
+m3.back <- step(m3)
+summary(m3.back)
+```
+
+### forward selection
+
+```{r}
+m3.null <- glm(y ~ 1 , family=binomial(link=logit) ,data=bank_complete)
+m3.forward <- step(m3.null,
+                         scope=list(lower=formula(m3.null),upper=formula(m3)), 
+                         direction="forward",  data=bank_complete)
+summary(m3.forward)
+```
+
+### Using the difference in deviance to compare among the three models
+
+```{r}
+anova(m3.step,m3.back,test="Chisq")
+anova(m3.forward,m3.step,test="Chisq")
+```
+
+## prediction and ROC
+
+```{r}
+pred <- predict(m3.step, type="response")
+
+par(mfrow=c(1,1))
+m3.step.roc <- roc(y ~ pred, plot = TRUE, print.auc = TRUE)
+```
+```{r}
+```
+
+## Misclassification Rate:
+
+```{r}
+class.table <- data.frame(response = y, predicted = round(pred,0))
+xtabs(~ predicted + response, data= class.table)
+```
+```{r}
+miscl_Error = (253+517)/10127
+miscl_Error
+```
+
+## Training and Test data - Dividing data randomly between Training and Test for prediction #avg open to buy and total revolving balance
+
+
+```{r}
+spl.split = sample.split(bank_complete$Attrition_Flag, SplitRatio = 0.02)
+```
+
+```{r}
+train.spl = subset(bank_complete, spl.split == FALSE)
+```
+
+```{r}
+test.spl = subset(bank_complete, spl.split == TRUE)
+```
+
+```{r}
+m4 <- glm(train.spl$Attrition_Flag~Gender+Education_Level+Marital_Status+Income_Category+Card_Category+Customer_Age+Dependent_count+sqrt(Dependent_count)+log(Months_on_book)+
+            Months_on_book+Total_Relationship_Count+log(Total_Relationship_Count)+Months_Inactive_12_mon+sqrt(Months_Inactive_12_mon)+
+            Contacts_Count_12_mon+sqrt(Contacts_Count_12_mon)+Credit_Limit+log(Credit_Limit)+
+            Avg_Open_To_Buy+log(Avg_Open_To_Buy)+Total_Amt_Chng_Q4_Q1+Total_Trans_Amt+log(Total_Trans_Amt)+Total_Trans_Ct+log(Total_Trans_Ct)
+           +Total_Ct_Chng_Q4_Q1+Avg_Utilization_Ratio+sqrt(Avg_Utilization_Ratio),family=binomial(),data=train.spl)
+```
+
+```{r}
+summary(m4)
+```
+
+### stepwise selection
+
+```{r}
+m4.step <- step(m4,direction="both")
+summary(m4.step)
+```
+
+### Backward selection
+
+```{r}
+m4.back <- step(m4)
+summary(m4.back)
+```
+
+### forward selection
+
+```{r}
+m4.null <- glm(train.spl$Attrition_Flag ~ 1 , family=binomial(link=logit) ,data=train.spl)
+m4.forward <- step(m4.null,
+                         scope=list(lower=formula(m4.null),upper=formula(m4)), 
+                         direction="forward",  data=train.spl)
+summary(m4.forward)
+```
+```{r}
+anova(m4.step,m4.back,test="Chisq")
+```
+```{r}
+anova(m4.forward,m4.step,test="Chisq")
+```
+```{r}
+summary(m4.step)
+                        
+```
+## Prediction and misclassification error for training data
+
+```{r}
+pred.train.spl = predict(m4.step, newdata = train.spl,
+                      type = "response")
+ 
+```
+
+```{r}
+class.table3 <- data.frame(response3 = train.spl$Attrition_Flag, predicted3 = round(pred.train.spl,0))
+xtabs(~ predicted3 + response3, data= class.table3)
+```
+
+```{r}
+miscl_Error_train = (249+505)/9924
+miscl_Error_train
+```
+
+## Prediction and misclassification error for test data
+
+```{r}
+pred.test.spl = predict(m4.step, newdata = test.spl,
+                      type = "response")
+ 
+```
+
+```{r}
+class.table2 <- data.frame(response2 = test.spl$Attrition_Flag, predicted2 = round(pred.test.spl,0))
+xtabs(~ predicted2 + response2, data= class.table2)
+```
+
+```{r}
+miscl_Error_test = (12+3)/203
+miscl_Error_test
+```
